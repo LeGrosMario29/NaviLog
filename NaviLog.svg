@@ -1,0 +1,73 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A2342"/>
+      <stop offset="1" stop-color="#06152A"/>
+    </linearGradient>
+
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#3BA7FF"/>
+      <stop offset="1" stop-color="#0E5EC9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fond -->
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="url(#bg)"/>
+
+  <!-- Barre -->
+  <circle cx="220" cy="220" r="90" stroke="white" stroke-width="16" fill="none"/>
+  <circle cx="220" cy="220" r="18" fill="white"/>
+
+  <!-- Branches -->
+  <g stroke="white" stroke-width="10" stroke-linecap="round">
+    <line x1="220" y1="110" x2="220" y2="75"/>
+    <line x1="220" y1="330" x2="220" y2="365"/>
+    <line x1="110" y1="220" x2="75" y2="220"/>
+    <line x1="330" y1="220" x2="365" y2="220"/>
+
+    <line x1="142" y1="142" x2="117" y2="117"/>
+    <line x1="298" y1="298" x2="323" y2="323"/>
+
+    <line x1="298" y1="142" x2="323" y2="117"/>
+    <line x1="142" y1="298" x2="117" y2="323"/>
+  </g>
+
+  <!-- Poignées -->
+  <g fill="white">
+    <circle cx="220" cy="65" r="12"/>
+    <circle cx="220" cy="375" r="12"/>
+    <circle cx="65" cy="220" r="12"/>
+    <circle cx="375" cy="220" r="12"/>
+
+    <circle cx="110" cy="110" r="12"/>
+    <circle cx="330" cy="330" r="12"/>
+
+    <circle cx="330" cy="110" r="12"/>
+    <circle cx="110" cy="330" r="12"/>
+  </g>
+
+  <!-- Crayon -->
+  <g transform="rotate(-18 340 320)">
+    <rect x="285" y="210" width="70" height="170" rx="14" fill="white"/>
+    <rect x="295" y="225" width="50" height="120" rx="8" fill="#0A2342"/>
+
+    <rect x="285" y="190" width="70" height="30" rx="8" fill="#3BA7FF"/>
+
+    <path d="M285 380 L320 435 L355 380 Z" fill="white"/>
+    <path d="M308 410 L320 435 L332 410 Z" fill="#0A2342"/>
+  </g>
+
+  <!-- Vagues -->
+  <path d="M110 410C160 385 220 435 280 410C330 390 380 430 420 405"
+        stroke="url(#wave)"
+        stroke-width="12"
+        stroke-linecap="round"
+        fill="none"/>
+
+  <path d="M120 440C180 415 240 465 310 438C350 423 390 450 430 432"
+        stroke="#1F6FE5"
+        stroke-width="8"
+        stroke-linecap="round"
+        opacity="0.7"
+        fill="none"/>
+</svg>
