@@ -17,6 +17,7 @@ import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 from typing import Optional
 
 
@@ -190,16 +191,18 @@ class Logbook:
         self.voyage_name: str = ""
         self.distance_planned_nm: float = None
         self.points: list[LogPoint] = []
-        self.filepath: Optional[Path] = None
+        self.filepath: Path = Path(os.getcwd()) # ajouter un nom de fichier std
         self._dirty: bool = False
 
     # ------------------------------------------------------------------
     # Métadonnées voyage
     # ------------------------------------------------------------------
 
-    def set_voyage(self, name: str, distance_planned: float = None):
+    def set_voyage(self, name: str, distance_planned: float = None, fp:
+                   str = ""):
         self.voyage_name = name
         self.distance_planned_nm = distance_planned
+        self.filepath = Path(fp)
         self._dirty = True
 
     # ------------------------------------------------------------------
@@ -236,7 +239,7 @@ class Logbook:
         self._dirty = False
 
     def save(self, path: Path = None):
-        target = path or self.filepath
+        target = path or Path(self.filepath)
         if not target:
             raise ValueError("Aucun fichier spécifié pour la sauvegarde.")
         self.filepath = target
@@ -246,7 +249,6 @@ class Logbook:
             "created": datetime.now().astimezone().isoformat(timespec='seconds'),
             "points": [p.to_dict() for p in self.points],
         }
-        target = Path(target)
         target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
         self._dirty = False
 
@@ -263,9 +265,8 @@ class Logbook:
     def is_dirty(self) -> bool:
         return self._dirty
 
-    @property
-    def filename(self) -> str:
-        return self.filepath if self.filepath else "Sans titre"
+    def filepath(self) -> Path:
+        return self.filepath if self.filepath else ""
 
 
 class AutoRecorder:

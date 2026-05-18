@@ -17,24 +17,12 @@ from tkinter import ttk
 
 import threading
 import time
+from pathlib import Path
 
 from logbook import Logbook, LogPoint, EVENT_TYPES, PeriodicRecorder, AutoRecorder
 from nmea_receiver import NMEAReceiver, NMEASimulator
 
-from theme import Fonts
-
-# ── Palette marine sombre ───────────────────────────────────────────────────
-BG       = "#0d1b2a"
-BG2      = "#1b2d3e"
-BG3      = "#24404f"
-ACCENT   = "#00b4d8"
-ACCENT2  = "#48cae4"
-WARN     = "#f4a261"
-OK       = "#52b788"
-TEXT     = "#e0f4ff"
-TEXT2    = "#90b8cc"
-TEXT_DIM = "#506070"
-RED      = "#e63946"
+from theme import Fonts, Colors
 
 
 def _fmt_float(v, decimals=1, unit=""):
@@ -47,13 +35,13 @@ class StatBox(ctk.CTkFrame):
     """Petite boîte affichant un label + une valeur + unité."""
 
     def __init__(self, parent, label, unit="", **kwargs):
-        super().__init__(parent, fg_color=BG2, border_width=0, **kwargs)
-        ctk.CTkLabel(self, text=label.upper(), font=Fonts.FONT_SMALL, fg_color=BG2,
-                 text_color=TEXT_DIM).pack(anchor='w', padx=8, pady=(6, 0))
+        super().__init__(parent, fg_color=Colors.BG2, border_width=0, **kwargs)
+        ctk.CTkLabel(self, text=label.upper(), font=Fonts.FONT_SMALL, fg_color=Colors.BG2,
+                     text_color=Colors.TEXT_DIM).pack(anchor='w', padx=8, pady=(6, 0))
         self._var = tk.StringVar(value="—")
         self._unit = unit
         self._val_label = ctk.CTkLabel(self, textvariable=self._var,
-                                   font=Fonts.FONT_VALUE, fg_color=BG2, text_color=ACCENT)
+                                       font=Fonts.FONT_VALUE, fg_color=Colors.BG2, text_color=Colors.ACCENT)
         self._val_label.pack(anchor='w', padx=8, pady=(0, 6))
 
     def set(self, value, color=None):
@@ -69,29 +57,29 @@ class NMEAGauge(ctk.CTkFrame):
     """Ligne d'affichage des données NMEA temps réel + moyenne 1h."""
 
     def __init__(self, parent):
-        super().__init__(parent, fg_color=BG)
+        super().__init__(parent, fg_color=Colors.BG)
 
         self._vars = {}   # name -> (val_var, avg_var, unit)
         fields = [
-            ("SOG", "kn"), ("COG", "°"), ("AWA", "°"), ("AWS", "kn"),
-            ("TWD", "°"), ("TWA", "°"), ("TWS", "kn"),
-        ]
+                ("SOG", "kn"), ("COG", "°"), ("AWA", "°"), ("AWS", "kn"),
+                ("TWD", "°"), ("TWA", "°"), ("TWS", "kn"),
+                ]
         for i, (name, unit) in enumerate(fields):
-            f = ctk.CTkFrame(self, fg_color=BG3)
+            f = ctk.CTkFrame(self, fg_color=Colors.BG3)
             f.grid(row=0, column=i, padx=2, pady=2, sticky='ew')
             self.columnconfigure(i, weight=1)
-            ctk.CTkLabel(f, text=name, font=Fonts.FONT_SMALL, fg_color=BG3, text_color=TEXT_DIM).pack()
+            ctk.CTkLabel(f, text=name, font=Fonts.FONT_SMALL, fg_color=Colors.BG3, text_color=Colors.TEXT_DIM).pack()
             val_var = tk.StringVar(value="—")
             avg_var = tk.StringVar(value="")
-            ctk.CTkLabel(f, textvariable=val_var, font=Fonts.FONT_VALUE, fg_color=BG3, text_color=ACCENT2).pack()
-            ctk.CTkLabel(f, textvariable=avg_var, font=Fonts.FONT_SMALL, fg_color=BG3, text_color=TEXT_DIM).pack()
+            ctk.CTkLabel(f, textvariable=val_var, font=Fonts.FONT_VALUE, fg_color=Colors.BG3, text_color=Colors.ACCENT2).pack()
+            ctk.CTkLabel(f, textvariable=avg_var, font=Fonts.FONT_SMALL, fg_color=Colors.BG3, text_color=Colors.TEXT_DIM).pack()
             self._vars[name] = (val_var, avg_var, unit)
 
     def update_from_nmea(self, snap, avgs: dict = None):
         mapping = {
-            'SOG': snap.sog, 'COG': snap.cog, 'AWA': snap.awa, 'AWS': snap.aws,
-            'TWD': snap.twd, 'TWA': snap.twa, 'TWS': snap.tws,
-        }
+                'SOG': snap.sog, 'COG': snap.cog, 'AWA': snap.awa, 'AWS': snap.aws,
+                'TWD': snap.twd, 'TWA': snap.twa, 'TWS': snap.tws,
+                }
         avgs = avgs or {}
         for name, val in mapping.items():
             val_var, avg_var, unit = self._vars[name]
@@ -100,13 +88,44 @@ class NMEAGauge(ctk.CTkFrame):
             avg_var.set(f"({_fmt_float(avg, 1, unit)})" if avg is not None else "")
 
 
+class NMEALisse():
+    """accumulateur de données NMEA pour lisser les valeurs"""
+
+    def __init__(self):
+        self._last_update = 0
+        self._duree = 0
+        self._compteurs = {"cog": 0, "sog": 0, "awa": 0, "aws": 0, "twd": 0, "twa": 0, "tws": 0}
+
+    def add_data(self, d):
+        delta = d.last_update - self._last_update
+        if delta <= 0:
+            return
+        self._last_update = d.last_update
+        self._duree += delta
+        self._compteurs["cog"] += delta * d.cog
+        self._compteurs["sog"] += delta * d.sog
+        self._compteurs["awa"] += delta * d.awa
+        self._compteurs["aws"] += delta * d.aws
+        self._compteurs["twd"] += delta * d.twd
+        self._compteurs["twa"] += delta * d.twa
+        self._compteurs["tws"] += delta * d.tws
+
+    def read_values():
+        c = self._compteurs
+        for k in self._compteurs:
+            c[k] = c[k] / self._duree
+        self._duree = 0
+        self._compteurs = {"cog": 0, "sog": 0, "awa": 0, "aws": 0, "twd": 0, "twa": 0, "tws": 0}
+        return c
+
+
 class PointDialog(ctk.CTkToplevel):
     """Dialogue de création ou d'édition d'un point."""
 
     def __init__(self, parent, point: LogPoint = None, title="Nouveau point"):
         super().__init__(parent)
         self.title(title)
-        self.configure(fg_color=BG)
+        self.configure(fg_color=Colors.BG)
         self.resizable(False, False)
         self.grab_set()
         self.result: LogPoint = None
@@ -120,69 +139,69 @@ class PointDialog(ctk.CTkToplevel):
         pad = dict(padx=12, pady=4)
 
         # En-tête NMEA (lecture seule si édition, éditable si nouveau)
-        nmea_frame = tk.LabelFrame(self, text=" Données NMEA ", fg=ACCENT,
-                                   bg=BG, font=Fonts.FONT_SMALL, bd=1,
-                                   highlightbackground=BG3)
+        nmea_frame = tk.LabelFrame(self, text=" Données NMEA ", fg=Colors.ACCENT,
+                                   bg=Colors.BG, font=Fonts.FONT_SMALL, bd=1,
+                                   highlightbackground=Colors.BG3)
         nmea_frame.pack(fill='x', padx=12, pady=(12, 4))
 
         self._nmea_vars = {}
         fields = [
-            ("Heure UTC", "time_utc", str),
-            ("Lat", "lat", float), ("Lon", "lon", float),
-            ("COG °", "cog", float), ("SOG kn", "sog", float),
-            ("AWA °", "awa", float), ("AWS kn", "aws", float),
-            ("TWD °", "twd", float), ("TWA °", "twa", float),
-            ("TWS kn", "tws", float),
-        ]
+                ("Heure UTC", "time_utc", str),
+                ("Lat", "lat", float), ("Lon", "lon", float),
+                ("COG °", "cog", float), ("SOG kn", "sog", float),
+                ("AWA °", "awa", float), ("AWS kn", "aws", float),
+                ("TWD °", "twd", float), ("TWA °", "twa", float),
+                ("TWS kn", "tws", float),
+                ]
         for i, (label, attr, typ) in enumerate(fields):
             r, c = divmod(i, 5)
-            ctk.CTkLabel(nmea_frame, text=label, font=Fonts.FONT_SMALL, fg_color=BG,
-                     text_color=TEXT2).grid(row=r*2, column=c, padx=6, pady=(4, 0), sticky='w')
+            ctk.CTkLabel(nmea_frame, text=label, font=Fonts.FONT_SMALL, fg_color=Colors.BG,
+                         text_color=Colors.TEXT2).grid(row=r*2, column=c, padx=6, pady=(4, 0), sticky='w')
             val = getattr(p, attr)
             var = tk.StringVar(value="" if val is None else str(val))
             self._nmea_vars[attr] = (var, typ)
             e = ctk.CTkEntry(nmea_frame, textvariable=var, font=Fonts.FONT_SMALL,
-                         fg_color=BG3, text_color=TEXT, width=12)
+                             fg_color=Colors.BG3, text_color=Colors.TEXT, width=12)
             e.grid(row=r*2+1, column=c, padx=6, pady=(0, 4), sticky='ew')
             nmea_frame.columnconfigure(c, weight=1)
 
         # Timestamp
-        ts_frame = ctk.CTkFrame(self, fg_color=BG)
+        ts_frame = ctk.CTkFrame(self, fg_color=Colors.BG)
         ts_frame.pack(fill='x', padx=12, pady=2)
-        ctk.CTkLabel(ts_frame, text="Timestamp :", font=Fonts.FONT_SMALL, fg_color=BG,
-                 text_color=TEXT2).pack(side='left')
+        ctk.CTkLabel(ts_frame, text="Timestamp :", font=Fonts.FONT_SMALL, fg_color=Colors.BG,
+                     text_color=Colors.TEXT2).pack(side='left')
         self._ts_var = tk.StringVar(value=p.timestamp)
         ctk.CTkEntry(ts_frame, textvariable=self._ts_var, font=Fonts.FONT_SMALL,
-                 fg_color=BG3, text_color=TEXT, width=120).pack(side='left', padx=8)
+                     fg_color=Colors.BG3, text_color=Colors.TEXT, width=120).pack(side='left', padx=8)
 
         # Événement
-        ev_frame = ctk.CTkFrame(self, fg_color=BG)
+        ev_frame = ctk.CTkFrame(self, fg_color=Colors.BG)
         ev_frame.pack(fill='x', padx=12, pady=4)
-        ctk.CTkLabel(ev_frame, text="Événement :", font=Fonts.FONT_SMALL, fg_color=BG,
-                 text_color=TEXT2).pack(side='left')
+        ctk.CTkLabel(ev_frame, text="Événement :", font=Fonts.FONT_SMALL, fg_color=Colors.BG,
+                     text_color=Colors.TEXT2).pack(side='left')
         self._event_var = tk.StringVar(value=p.event or "routine")
         ev_menu = ctk.CTkComboBox(ev_frame, variable=self._event_var,
-                               values=EVENT_TYPES, state='readonly',
-                               font=Fonts.FONT_SMALL, width=120)
+                                  values=EVENT_TYPES, state='readonly',
+                                  font=Fonts.FONT_SMALL, width=120)
         ev_menu.pack(side='left', padx=8)
 
         # Note libre
-        note_frame = tk.LabelFrame(self, text=" Note ", fg=ACCENT, bg=BG,
+        note_frame = tk.LabelFrame(self, text=" Note ", fg=Colors.ACCENT, bg=Colors.BG,
                                    font=Fonts.FONT_SMALL, bd=1)
         note_frame.pack(fill='x', padx=12, pady=4)
         self._note = ctk.CTkTextbox(note_frame, height=3, font=Fonts.FONT_SMALL,
-                             fg_color=BG3, text_color=TEXT, wrap='word')
+                                    fg_color=Colors.BG3, text_color=Colors.TEXT, wrap='word')
         self._note.pack(fill='x', padx=6, pady=6)
         if p.note:
             self._note.insert('1.0', p.note)
 
         # Boutons
-        btn_frame = ctk.CTkFrame(self, fg_color=BG)
+        btn_frame = ctk.CTkFrame(self, fg_color=Colors.BG)
         btn_frame.pack(fill='x', padx=12, pady=10)
         ctk.CTkButton(btn_frame, text="✓ Enregistrer", font=Fonts.FONT_LABEL,
-                  fg_color=OK, text_color=BG, command=self._save).pack(side='left', padx=4)
+                      fg_color=Colors.OK, text_color=Colors.BG, command=self._save).pack(side='left', padx=4)
         ctk.CTkButton(btn_frame, text="✗ Annuler", font=Fonts.FONT_LABEL,
-                  fg_color=BG3, text_color=TEXT2, command=self.destroy).pack(side='left', padx=4)
+                      fg_color=Colors.BG3, text_color=Colors.TEXT2, command=self.destroy).pack(side='left', padx=4)
 
     def _save(self):
         p = LogPoint()
@@ -209,8 +228,9 @@ class SettingsDialog(ctk.CTkToplevel):
 
     def __init__(self, parent, logbook: Logbook, interval_var: tk.IntVar):
         super().__init__(parent)
+        self.parent = parent
         self.title("Paramètres du voyage")
-        self.configure(fg_color=BG)
+        self.configure(fg_color=Colors.BG)
         self.resizable(False, False)
         self.grab_set()
         self.grab_set()
@@ -221,14 +241,16 @@ class SettingsDialog(ctk.CTkToplevel):
         self.wait_window()
 
     def _build(self):
-        fr = ctk.CTkFrame(self, fg_color=BG)
+        fr = ctk.CTkFrame(self, fg_color=Colors.BG)
         fr.pack(padx=20, pady=16)
 
-        def row(label, var, width=30):
-            ctk.CTkLabel(fr, text=label, font=Fonts.FONT_SMALL, fg_color=BG, text_color=TEXT2,
-                     anchor='w', width=24).pack(anchor='w', pady=(6, 0))
-            e = ctk.CTkEntry(fr, textvariable=var, font=Fonts.FONT_SMALL, fg_color=BG3,
-                         text_color=TEXT, width=width)
+        def row(label, var, kmd=None, width=30):
+            ctk.CTkLabel(fr, text=label, font=Fonts.FONT_SMALL, fg_color=Colors.BG, text_color=Colors.TEXT2,
+                         anchor='w', width=24).pack(anchor='w', pady=(6, 0))
+            e = ctk.CTkEntry(fr, textvariable=var, font=Fonts.FONT_SMALL, fg_color=Colors.BG3,
+                             text_color=Colors.TEXT, width=width)
+            if kmd != None:
+                e.bind('<ButtonPress-1>', lambda _ : kmd())
             e.pack(fill='x', pady=(0, 2))
             return e
 
@@ -236,15 +258,35 @@ class SettingsDialog(ctk.CTkToplevel):
         self._dist_var = tk.StringVar(value="" if self._logbook.distance_planned_nm is None
                                       else str(self._logbook.distance_planned_nm))
         self._interval_local = tk.StringVar(value=str(self._interval_var.get()))
-        self._filename_var = tk.StringVar(value=str(self._logbook.filename))
+        self._filepath_var = tk.StringVar(value=str(self._logbook.filepath))
 
         row("Nom du voyage", self._name_var)
-        row("Distance ortho prévue (NM)", self._dist_var, 12)
-        row("Intervalle d'enregistrement auto (min)", self._interval_local, 6)
-        row("Nom du fichier de log", self._filename_var)
+        row("Distance ortho prévue (NM)", self._dist_var, None, 12)
+        row("Intervalle d'enregistrement auto (min)", self._interval_local,
+            None, 6)
+        row("Nom du fichier de log", self._filepath_var, self._choose_filepath)
 
         ctk.CTkButton(fr, text="✓ Valider", font=Fonts.FONT_LABEL,
-                  fg_color=OK, text_color=BG, command=self._save).pack(pady=(12, 0))
+                      fg_color=Colors.OK, text_color=Colors.BG, command=self._save).pack(pady=(12, 0))
+
+    def _choose_filepath(self):
+        # path = self._logbook.filepath
+        # if not path or not Path(path).is_file():
+        path = tk.filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON", "*.json")],
+                title="Enregistrer sous…"
+                )
+        if not path:
+            return
+        else:
+            self._logbook.filepath = Path(path)
+        try:
+            self._logbook.save(Path(path))
+            self._filepath_var.set(str(self._logbook.filepath))
+            self.parent._status(f"Sauvegardé : {self._logbook.filepath}")
+        except Exception as e:
+            tk.messagebox.showerror("Erreur", f"Impossible de sauvegarder :\n{e}")
 
     def _save(self):
         name = self._name_var.get().strip()
@@ -255,26 +297,24 @@ class SettingsDialog(ctk.CTkToplevel):
                 dist = float(dist_raw)
             except ValueError:
                 pass
-        self._logbook.set_voyage(name, dist)
+        self._logbook.set_voyage(name, dist, self._filepath_var.get().strip())
         try:
             iv = int(self._interval_local.get())
             if 1 <= iv <= 1440:
                 self._interval_var.set(iv)
         except ValueError:
             pass
-        if self._filename_var.get().strip() != "":
-            self._logbook.filepath = self._filename_var.get().strip()
         self.destroy()
 
 
 class MainWindow(ctk.CTk):
     """Fenêtre principale de l'application."""
-    
+
     def __init__(self, nmea_mode: str = 'udp', nmea_host: str = '',
                  nmea_port: int = 2000, use_sim: bool = True):
         super().__init__()
         self.title("⚓ NaviLog")
-        self.configure(fg_color=BG)
+        self.configure(fg_color=Colors.BG)
         self.minsize(1100, 800)
 
         Fonts.init()
@@ -290,16 +330,20 @@ class MainWindow(ctk.CTk):
         self._nmea_host = nmea_host
         self._nmea_port = nmea_port
 
+        # le lisseur de données NMEA
+        self._nmea_lisse = NMEALisse()
+
         # Enregistreurs
+        self._recording = False
         self._periodic = PeriodicRecorder(
-            self._logbook, self._nmea.get_snapshot,
-            interval_minutes=self._interval_var.get(),
-            on_new_point_fn=self._on_new_auto_point
-        )
+                self._logbook, self._nmea.get_snapshot,
+                interval_minutes=self._interval_var.get(),
+                on_new_point_fn=self._on_new_auto_point
+                )
         self._auto_detect = AutoRecorder(
-            self._logbook, self._nmea.get_snapshot,
-            on_new_point_fn=self._on_new_auto_point
-        )
+                self._logbook, self._nmea.get_snapshot,
+                on_new_point_fn=self._on_new_auto_point
+                )
 
         # Simulateur UDP (uniquement en mode UDP si activé)
         self._use_sim = use_sim and nmea_mode == 'udp'
@@ -312,66 +356,71 @@ class MainWindow(ctk.CTk):
 
     # ── Construction UI ─────────────────────────────────────────────────────
 
-    def _build_ui(self):   
+    def _build_ui(self):
         # Barre du haut : titre + voyage
-        top = ctk.CTkFrame(self, fg_color=BG)
+        top = ctk.CTkFrame(self, fg_color=Colors.BG)
         top.pack(fill='x', padx=0, pady=6)
 
         ctk.CTkLabel(top, text="⚓ NaviLog", font=Fonts.FONT_MEDIUM,
-                 fg_color=BG, text_color=ACCENT).pack(side='left', padx=16)
-                 
+                     fg_color=Colors.BG, text_color=Colors.ACCENT).pack(side='left', padx=16)
+
         self._voyage_label = ctk.CTkLabel(top, text="— Sans voyage —",
-                                      font=Fonts.FONT_TITLE, fg_color=BG, text_color=WARN)
+                                          font=Fonts.FONT_TITLE, fg_color=Colors.BG, text_color=Colors.WARN)
         self._voyage_label.pack(side='left', padx=16)
 
         # Boutons menu
         for label, cmd in [
-            ("Nouveau", self._new_file),
-            ("Ouvrir", self._open_file),
-            ("Enregistrer", self._save_file),
-            ("Paramètres", self._open_settings),
-        ]:
-            ctk.CTkButton(top, text=label, font=Fonts.FONT_SMALL, fg_color=BG3, text_color=TEXT,
-                      command=cmd).pack(side='right', padx=3)
+                ("Nouveau", self._new_file),
+                ("Ouvrir", self._open_file),
+                ("Paramètres", self._open_settings),
+                ("Enregistrer", self._toggle_recording),
+                ]:
+            ctk.CTkButton(top, text=label, font=Fonts.FONT_SMALL, fg_color=Colors.BG3, text_color=Colors.TEXT,
+                          command=cmd).pack(side='right', padx=3)
+
+        # Indicateur de sauvegarde
+        self._rec_status = ctk.CTkLabel(top, text="● Rec", font=Fonts.FONT_SMALL,
+                                         fg_color=Colors.BG, text_color=Colors.TEXT_DIM)
+        self._rec_status.pack(side='right', padx=8)
 
         # Indicateur de connexion NMEA
         self._nmea_status = ctk.CTkLabel(top, text="● NMEA", font=Fonts.FONT_SMALL,
-                                     fg_color=BG, text_color=TEXT_DIM)
+                                         fg_color=Colors.BG, text_color=Colors.TEXT_DIM)
         self._nmea_status.pack(side='right', padx=8)
 
-        sep = ctk.CTkFrame(self, fg_color=BG3, height=1)
+        sep = ctk.CTkFrame(self, fg_color=Colors.BG3, height=1)
         sep.pack(fill='x')
 
         # Jauge NMEA temps réel
-        gauge_frame = ctk.CTkFrame(self, fg_color=BG)
+        gauge_frame = ctk.CTkFrame(self, fg_color=Colors.BG)
         gauge_frame.pack(fill='x', padx=8, pady=4)
         self._gauge = NMEAGauge(gauge_frame)
         self._gauge.pack(fill='x')
 
-        sep2 = ctk.CTkFrame(self, fg_color=BG3, height=1)
+        sep2 = ctk.CTkFrame(self, fg_color=Colors.BG3, height=1)
         sep2.pack(fill='x')
 
         # Contenu principal : stats à gauche, liste à droite
-        main = ctk.CTkFrame(self, fg_color=BG)
+        main = ctk.CTkFrame(self, fg_color=Colors.BG)
         main.pack(fill='both', expand=True, padx=0)
 
         # Panneau stats gauche
-        left = ctk.CTkFrame(main, fg_color=BG, width=200)
+        left = ctk.CTkFrame(main, fg_color=Colors.BG, width=200)
         left.pack(side='left', fill='y', padx=8, pady=8)
         left.pack_propagate(False)
         self._build_stats_panel(left)
 
-        sep3 = ctk.CTkFrame(main, fg_color=BG3, width=1)
+        sep3 = ctk.CTkFrame(main, fg_color=Colors.BG3, width=1)
         sep3.pack(side='left', fill='y')
 
         # Panneau points droite
-        right = ctk.CTkFrame(main, fg_color=BG)
+        right = ctk.CTkFrame(main, fg_color=Colors.BG)
         right.pack(side='left', fill='both', expand=True, padx=8, pady=8)
         self._build_points_panel(right)
 
     def _build_stats_panel(self, parent):
-        ctk.CTkLabel(parent, text="STATISTIQUES", font=Fonts.FONT_SMALL, fg_color=BG,
-                 text_color=TEXT_DIM).pack(anchor='w', pady=(0, 6))
+        ctk.CTkLabel(parent, text="STATISTIQUES", font=Fonts.FONT_SMALL, fg_color=Colors.BG,
+                     text_color=Colors.TEXT_DIM).pack(anchor='w', pady=(0, 6))
 
         def stat(label, unit=""):
             b = StatBox(parent, label, unit)
@@ -386,40 +435,40 @@ class MainWindow(ctk.CTk):
         self._sb_sog_avg  = stat("SOG moy. 1h", " kn")
 
         # Position actuelle
-        ctk.CTkLabel(parent, text="POSITION", font=Fonts.FONT_SMALL, fg_color=BG,
-                 text_color=TEXT_DIM).pack(anchor='w', pady=(16, 0))
+        ctk.CTkLabel(parent, text="POSITION", font=Fonts.FONT_SMALL, fg_color=Colors.BG,
+                     text_color=Colors.TEXT_DIM).pack(anchor='w', pady=(16, 0))
         self._pos_label = ctk.CTkLabel(parent, text="— —", font=Fonts.FONT_LABEL,
-                                   fg_color=BG, text_color=TEXT2)
+                                       fg_color=Colors.BG, text_color=Colors.TEXT2)
         self._pos_label.pack(anchor='w')
         self._time_label = ctk.CTkLabel(parent, text="", font=Fonts.FONT_SMALL,
-                                    fg_color=BG, text_color=TEXT_DIM)
+                                        fg_color=Colors.BG, text_color=Colors.TEXT_DIM)
         self._time_label.pack(anchor='w')
 
     def _build_points_panel(self, parent):
-        hdr = ctk.CTkFrame(parent, fg_color=BG)
+        hdr = ctk.CTkFrame(parent, fg_color=Colors.BG)
         hdr.pack(fill='x')
         ctk.CTkLabel(hdr, text="POINTS ENREGISTRÉS", font=Fonts.FONT_SMALL,
-                 fg_color=BG, text_color=TEXT_DIM).pack(side='left')
+                     fg_color=Colors.BG, text_color=Colors.TEXT_DIM).pack(side='left')
 
         for label, cmd in [
-            ("+ Nouveau point", self._new_point),
-            ("✎ Modifier", self._edit_point),
-            ("🗑 Supprimer", self._delete_point),
-        ]:
-            ctk.CTkButton(hdr, text=label, font=Fonts.FONT_SMALL, fg_color=BG3, text_color=TEXT,
-                      command=cmd).pack(side='right', padx=2)
+                ("+ Nouveau point", self._new_point),
+                ("✎ Modifier", self._edit_point),
+                ("🗑 Supprimer", self._delete_point),
+                ]:
+            ctk.CTkButton(hdr, text=label, font=Fonts.FONT_SMALL, fg_color=Colors.BG3, text_color=Colors.TEXT,
+                          command=cmd).pack(side='right', padx=2)
 
         # Filtre
-        filter_frame = ctk.CTkFrame(parent, fg_color=BG)
+        filter_frame = ctk.CTkFrame(parent, fg_color=Colors.BG)
         filter_frame.pack(fill='x', pady=4)
-        
+
         # menu déroulant pour filtrer par évènement (à améliorer pour pouvoir en choisir plusieurs)
         ctk.CTkLabel(filter_frame, text="Filtre événement :", font=Fonts.FONT_SMALL,
-                 fg_color=BG, text_color=TEXT2).pack(side='left')
+                     fg_color=Colors.BG, text_color=Colors.TEXT2).pack(side='left')
         self._filter_var = ctk.StringVar(value="tous")
         filter_menu = ctk.CTkComboBox(filter_frame, variable=self._filter_var,
-                                   values=["tous"] + EVENT_TYPES, state='readonly',
-                                   font=Fonts.FONT_SMALL, width=120, command=self._refresh_points)
+                                      values=["tous"] + EVENT_TYPES, state='readonly',
+                                      font=Fonts.FONT_SMALL, width=120, command=self._refresh_points)
         filter_menu.pack(side='left', padx=6)
 
         # checkbox pour masquer ou non les points automatiques
@@ -429,43 +478,43 @@ class MainWindow(ctk.CTk):
         checkbox_show_auto.pack(side='left', padx=6)
 
         # Liste
-        list_frame = ctk.CTkFrame(parent, fg_color=BG)
+        list_frame = ctk.CTkFrame(parent, fg_color=Colors.BG)
         list_frame.pack(fill='both', expand=True)
 
         style = ttk.Style()
         style.theme_use('clam')
         style.configure("Log.Treeview",
-                         background=BG2, foreground=TEXT,
-                         fieldbackground=BG2, rowheight=24,
-                         font=Fonts.FONT_SMALL)
+                        background=Colors.BG2, foreground=Colors.TEXT,
+                        fieldbackground=Colors.BG2, rowheight=24,
+                        font=Fonts.FONT_SMALL)
         style.configure("Log.Treeview.Heading",
-                         background=BG3, foreground=ACCENT2,
-                         font=Fonts.FONT_SMALL)
+                        background=Colors.BG3, foreground=Colors.ACCENT2,
+                        font=Fonts.FONT_SMALL)
         style.map("Log.Treeview",
-                  background=[('selected', BG3)],
-                  foreground=[('selected', ACCENT)])
+                  background=[('selected', Colors.BG3)],
+                  foreground=[('selected', Colors.ACCENT)])
 
         cols = ("time", "sog", "cog", "awa", "aws", "event", "note")
 
         self._tree = ttk.Treeview(list_frame, columns=cols, show='headings',
-                                   style="Log.Treeview", selectmode='browse')
+                                  style="Log.Treeview", selectmode='browse')
 
         headers = {
-            "time": ("Date/Heure", 110),
-            "sog": ("SOG kn", 70),
-            "cog": ("COG°", 60),
-            "awa": ("AWA°", 60),
-            "aws": ("AWS kn", 70),
-            "event": ("Événement", 90),
-            "note": ("Note", 250),
-        }
+                "time": ("Date/Heure", 110),
+                "sog": ("SOG kn", 70),
+                "cog": ("COG°", 60),
+                "awa": ("AWA°", 60),
+                "aws": ("AWS kn", 70),
+                "event": ("Événement", 90),
+                "note": ("Note", 250),
+                }
         for col, (text, width) in headers.items():
             self._tree.heading(col, text=text)
             self._tree.column(col, width=width, anchor='center')
         self._tree.column("note", anchor='w')
 
         sb = ctk.CTkScrollbar(list_frame, orientation='vertical',
-                           command=self._tree.yview)
+                              command=self._tree.yview)
         self._tree.configure(yscrollcommand=sb.set)
         self._tree.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
@@ -475,7 +524,16 @@ class MainWindow(ctk.CTk):
         # Barre de statut
         self._status_var = tk.StringVar(value="Prêt.")
         ctk.CTkLabel(parent, textvariable=self._status_var, font=Fonts.FONT_SMALL,
-                 fg_color=BG, text_color=TEXT_DIM, anchor='w').pack(fill='x', pady=(4, 0))
+                     fg_color=Colors.BG, text_color=Colors.TEXT_DIM, anchor='w').pack(fill='x', pady=(4, 0))
+
+    # ── Divers ───────────────────────────────────────────────────────────────
+
+    def _toggle_recording(self):
+        if not self._recording:
+            self._save_file()
+        self._recording = not self._recording
+        color = Colors.RED if self._recording else Colors.TEXT_DIM
+        self._rec_status.configure(text_color=color)
 
     # ── Services ─────────────────────────────────────────────────────────────
 
@@ -494,6 +552,7 @@ class MainWindow(ctk.CTk):
 
     def _refresh_nmea_ui(self):
         snap = self._nmea.get_snapshot()
+        self._nmea_lisse.add_data(snap)
         avgs = self._compute_gauge_avgs()
         self._gauge.update_from_nmea(snap, avgs)
         # Position
@@ -504,7 +563,7 @@ class MainWindow(ctk.CTk):
         self._time_label.configure(text=snap.time_utc)
         # Indicateur NMEA : couleur selon fraîcheur des données
         age = time.time() - snap.last_update
-        color = OK if age < 5 else (WARN if age < 30 else RED)
+        color = Colors.OK if age < 5 else (Colors.WARN if age < 30 else Colors.RED)
         if self._nmea_mode == 'tcp':
             conn = "TCP ✓" if self._nmea.is_connected else "TCP …"
             self._nmea_status.configure(text=f"● {conn}", text_color=color)
@@ -516,9 +575,9 @@ class MainWindow(ctk.CTk):
         from datetime import datetime
         now = datetime.now().astimezone()
         keys = {
-            'SOG': 'sog', 'COG': 'cog', 'AWA': 'awa', 'AWS': 'aws',
-            'TWD': 'twd', 'TWA': 'twa', 'TWS': 'tws',
-        }
+                'SOG': 'sog', 'COG': 'cog', 'AWA': 'awa', 'AWS': 'aws',
+                'TWD': 'twd', 'TWA': 'twa', 'TWS': 'tws',
+                }
         buckets = {k: [] for k in keys}
         for p in self._logbook.points:
             try:
@@ -547,9 +606,9 @@ class MainWindow(ctk.CTk):
         stats = self._logbook.get_stats()
         self._sb_dist.set(f"{stats.distance_nm:.2f} NM")
         self._sb_planned.set(
-            f"{self._logbook.distance_planned_nm:.0f} NM"
-            if self._logbook.distance_planned_nm else "—"
-        )
+                f"{self._logbook.distance_planned_nm:.0f} NM"
+                if self._logbook.distance_planned_nm else "—"
+                )
         self._sb_time.set(stats.elapsed_str() if stats.elapsed_seconds else "—")
 
         aws_min = _fmt_float(stats.aws_min, 1) if stats.aws_min is not None else "—"
@@ -587,10 +646,12 @@ class MainWindow(ctk.CTk):
                 p.event,
                 p.note[:50] if p.note else "",
                 auto_mark,
-            ), tags=('auto',) if p.auto else ())
-        self._tree.tag_configure('auto', foreground=TEXT_DIM)
+                ), tags=('auto',) if p.auto else ())
+        self._tree.tag_configure('auto', foreground=Colors.TEXT_DIM)
         self._status(f"{len(self._logbook.points)} point(s) enregistré(s).")
         self._refresh_stats()
+        if self._recording:
+            self._save_file()
 
     def _status(self, msg: str):
         self._status_var.set(msg)
@@ -633,13 +694,13 @@ class MainWindow(ctk.CTk):
     def _new_file(self):
         if self._logbook.is_dirty:
             if not tk.messagebox.askyesno("Non sauvegardé",
-                                       "Des modifications non sauvegardées. Continuer ?"):
+                                          "Des modifications non sauvegardées. Continuer ?"):
                 return
         path = tk.filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[("JSON", "*.json"), ("Tous", "*.*")],
-            title="Nouveau carnet de bord"
-        )
+                defaultextension=".json",
+                filetypes=[("JSON", "*.json"), ("Tous", "*.*")],
+                title="Nouveau carnet de bord"
+                )
         if path:
             self._logbook.new_file(path)
             self._open_settings()
@@ -648,35 +709,35 @@ class MainWindow(ctk.CTk):
     def _open_file(self):
         if self._logbook.is_dirty:
             if not tk.messagebox.askyesno("Non sauvegardé",
-                                       "Des modifications non sauvegardées. Continuer ?"):
+                                          "Des modifications non sauvegardées. Continuer ?"):
                 return
         path = tk.filedialog.askopenfilename(
-            filetypes=[("JSON", "*.json"), ("Tous", "*.*")],
-            title="Ouvrir un carnet de bord"
-        )
+                filetypes=[("JSON", "*.json"), ("Tous", "*.*")],
+                title="Ouvrir un carnet de bord"
+                )
         if path:
             try:
                 self._logbook.load(path)
                 self._refresh_points()
-                self._status(f"Fichier chargé : {self._logbook.filename}")
+                self._status(f"Fichier chargé : {self._logbook.filepath}")
             except Exception as e:
                 tk.messagebox.showerror("Erreur", f"Impossible de charger le fichier :\n{e}")
 
     def _save_file(self):
         path = self._logbook.filepath
-        if not path:
+        if not path or not Path(path).is_file():
             path = tk.filedialog.asksaveasfilename(
-                defaultextension=".json",
-                filetypes=[("JSON", "*.json")],
-                title="Enregistrer sous…"
-            )
+                    defaultextension=".json",
+                    filetypes=[("JSON", "*.json")],
+                    title="Enregistrer sous…"
+                    )
             if not path:
                 return
             else:
-                self._logbook.filepath = path
+                self._logbook.filepath = Path(path)
         try:
-            self._logbook.save(path)
-            self._status(f"Sauvegardé : {self._logbook.filename}")
+            self._logbook.save(Path(path))
+            self._status(f"Sauvegardé : {self._logbook.filepath}")
         except Exception as e:
             tk.messagebox.showerror("Erreur", f"Impossible de sauvegarder :\n{e}")
 
@@ -684,6 +745,7 @@ class MainWindow(ctk.CTk):
         SettingsDialog(self, self._logbook, self._interval_var)
         self._periodic.set_interval(self._interval_var.get())
         self._refresh_stats()
+        self._refresh_points()
 
     def on_close(self):
         if self._logbook.is_dirty:
