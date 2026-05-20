@@ -21,10 +21,10 @@ import socket
 import threading
 import time
 from datetime import datetime, timezone
-
+from collections import deque
 
 class NMEAData:
-    """Snapshot des données NMEA les plus récentes."""
+    """Bloc des données NMEA pertinentes."""
     def __init__(self):
         self.time_utc: str = ""
         self.lat: float = None
@@ -58,6 +58,24 @@ class NMEAData:
         n.__dict__.update(self.__dict__)
         return n
 
+class NMEADeque(deque):
+    """Deque des 'n' derniers blocs reçus avec calcul de moyennes entre deux lectures"""
+    def __init__(self):
+        _NbMaxValues = 50
+        super().__init__({}, 50)
+
+    def add(self, data):
+        print("deque add")
+        self.append(data)
+        
+    def get_latest(self) -> NMEAData:
+        t = self.pop()
+        self.append(t)
+        print("deque read"+self)
+        return t
+
+    def get_and_reset_average_values(self) -> NMEAData:
+        return None
 
 # ---------------------------------------------------------------------------
 # Fonctions utilitaires de parsing
@@ -138,12 +156,15 @@ class NMEAReceiver:
         self._thread: threading.Thread = None
         self._callbacks = []
         self._connected = False   # pertinent uniquement en mode TCP
+        
+        self._nmea_deque = NMEADeque()
 
     # ── API publique ────────────────────────────────────────────────────────
 
     def get_snapshot(self) -> NMEAData:
         with self._lock:
-            return self.data.copy()
+            return self._nmea_deque.get_latest().copy()
+            # return self.data.copy()
 
     def add_callback(self, fn):
         """Enregistre une fonction appelée après chaque trame parsée avec succès."""
@@ -337,6 +358,7 @@ class NMEAReceiver:
                     updated = True
 
         if updated:
+            self._nmea_deque.append(d)
             for cb in self._callbacks:
                 try:
                     cb()
