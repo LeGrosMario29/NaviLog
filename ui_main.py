@@ -80,43 +80,12 @@ class NMEAGauge(ctk.CTkFrame):
                 'SOG': snap.sog, 'COG': snap.cog, 'AWA': snap.awa, 'AWS': snap.aws,
                 'TWD': snap.twd, 'TWA': snap.twa, 'TWS': snap.tws,
                 }
-        avgs = avgs or {}
+        avgs = avgs.to_dict() or {}
         for name, val in mapping.items():
             val_var, avg_var, unit = self._vars[name]
             val_var.set(_fmt_float(val, 1, unit))
             avg = avgs.get(name)
             avg_var.set(f"({_fmt_float(avg, 1, unit)})" if avg is not None else "")
-
-
-class NMEALisse():
-    """accumulateur de données NMEA pour lisser les valeurs"""
-
-    def __init__(self):
-        self._last_update = 0
-        self._duree = 0
-        self._compteurs = {"cog": 0, "sog": 0, "awa": 0, "aws": 0, "twd": 0, "twa": 0, "tws": 0}
-
-    def add_data(self, d):
-        delta = d.last_update - self._last_update
-        if delta <= 0:
-            return
-        self._last_update = d.last_update
-        self._duree += delta
-        self._compteurs["cog"] += delta * d.cog
-        self._compteurs["sog"] += delta * d.sog
-        self._compteurs["awa"] += delta * d.awa
-        self._compteurs["aws"] += delta * d.aws
-        self._compteurs["twd"] += delta * d.twd
-        self._compteurs["twa"] += delta * d.twa
-        self._compteurs["tws"] += delta * d.tws
-
-    def read_values():
-        c = self._compteurs
-        for k in self._compteurs:
-            c[k] = c[k] / self._duree
-        self._duree = 0
-        self._compteurs = {"cog": 0, "sog": 0, "awa": 0, "aws": 0, "twd": 0, "twa": 0, "tws": 0}
-        return c
 
 
 class PointDialog(ctk.CTkToplevel):
@@ -330,13 +299,10 @@ class MainWindow(ctk.CTk):
         self._nmea_host = nmea_host
         self._nmea_port = nmea_port
 
-        # le lisseur de données NMEA
-        self._nmea_lisse = NMEALisse()
-
         # Enregistreurs
         self._recording = False
         self._periodic = PeriodicRecorder(
-                self._logbook, self._nmea.get_snapshot,
+                self._logbook, self._nmea.get_and_reset_average_values,
                 interval_minutes=self._interval_var.get(),
                 on_new_point_fn=self._on_new_auto_point
                 )
@@ -552,8 +518,8 @@ class MainWindow(ctk.CTk):
 
     def _refresh_nmea_ui(self):
         snap = self._nmea.get_snapshot()
-        self._nmea_lisse.add_data(snap)
-        avgs = self._compute_gauge_avgs()
+        # avgs = self._compute_gauge_avgs()
+        avgs = self._nmea.get_and_reset_average_values(False)
         self._gauge.update_from_nmea(snap, avgs)
         # Position
         if snap.lat and snap.lon:
@@ -659,7 +625,7 @@ class MainWindow(ctk.CTk):
     # ── Actions points ────────────────────────────────────────────────────────
 
     def _new_point(self):
-        snap = self._nmea.get_snapshot()
+        snap = self._nmea.get_and_reset_average_values()
         from datetime import datetime as dt
         pre = LogPoint.from_nmea(snap, event="routine", note="", auto=False)
         if not pre.timestamp:

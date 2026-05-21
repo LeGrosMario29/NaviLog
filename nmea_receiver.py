@@ -19,9 +19,8 @@ Modes supportés :
 
 import socket
 import threading
-import time
+import time, math
 from datetime import datetime, timezone
-from collections import deque
 
 class NMEAData:
     """Bloc des données NMEA pertinentes."""
@@ -58,24 +57,94 @@ class NMEAData:
         n.__dict__.update(self.__dict__)
         return n
 
-class NMEADeque(deque):
-    """Deque des 'n' derniers blocs reçus avec calcul de moyennes entre deux lectures"""
+class NMEAAvg():
+    """Lissage des blocs reçus entre deux lectures, stockage et consultation du dernier bloc"""
+    """Valeurs lissées : moyenne pondérée simple sog, aws, tws, moyenne angulaire pénible cog, awa, twa, twd"""
+    
+    def average_angles(angles, durations):
+        x = sum(math.cos(math.radians(c)) * d for c, d in zip(angles, durations))
+        y = sum(math.sin(math.radians(c)) * d for c, d in zip(angles, durations))
+
+        angle = math.degrees(math.atan2(y, x))
+        return angle % 360
+    
     def __init__(self):
-        _NbMaxValues = 50
-        super().__init__({}, 50)
+        self._latest = NMEAData()
+        self._latest_get_and_reset_time = time.time()
+        self._avg = {
+            "tsog": 0,
+            "taws": 0,
+            "ttws": 0,
+            "txcog": 0,
+            "tycog": 0,
+            "txawa": 0,
+            "tyawa": 0,
+            "txtwa": 0,
+            "tytwa": 0,
+            "txtwd": 0,
+            "tytwd": 0,
+            "duration" : 0
+        }
 
     def add(self, data):
-        print("deque add")
-        self.append(data)
+        # print("NMEAAvg add data")
+        delta_t = data.last_update - self._latest.last_update
+        if self._avg["duration"] != 0:
+            self._avg["duration"] += delta_t
+            print("a" + str(self._avg["duration"]))
+        else:
+            self._avg["duration"] = data.last_update - self._latest_get_and_reset_time
+            print("b" + str(self._avg["duration"]))
+        self._avg["tsog"] += delta_t * data.sog
+        self._avg["taws"] += delta_t * data.aws
+        self._avg["ttws"] += delta_t * data.tws
+        self._avg["txcog"] += delta_t * math.cos(math.radians(data.cog))
+        self._avg["tycog"] += delta_t * math.sin(math.radians(data.cog))
+        self._avg["txawa"] += delta_t * math.cos(math.radians(data.awa))
+        self._avg["tyawa"] += delta_t * math.sin(math.radians(data.awa))
+        self._avg["txtwa"] += delta_t * math.cos(math.radians(data.twa))
+        self._avg["tytwa"] += delta_t * math.sin(math.radians(data.twa))
+        self._avg["txtwd"] += delta_t * math.cos(math.radians(data.twd))
+        self._avg["tytwd"] += delta_t * math.sin(math.radians(data.twd))
+        self._latest = data.copy()
         
     def get_latest(self) -> NMEAData:
-        t = self.pop()
-        self.append(t)
-        print("deque read"+self)
-        return t
+        # print("NMEAAvg get latest data")
+        return self._latest.copy()
 
-    def get_and_reset_average_values(self) -> NMEAData:
-        return None
+    def get_and_reset_average_values(self, reset_avgs = True) -> NMEAData:
+        d=NMEAData()
+        d.lat = self._latest.lat
+        d.lon = self._latest.lon
+        d.cog = math.degrees(math.atan2(self._avg["tycog"], self._avg["txcog"])) % 360
+        d.sog = self._avg["tsog"] / self._avg["duration"]
+        d.awa = math.degrees(math.atan2(self._avg["tyawa"], self._avg["txawa"])) % 360
+        d.aws = self._avg["taws"] / self._avg["duration"]
+        d.twd = math.degrees(math.atan2(self._avg["tytwd"], self._avg["txtwd"])) % 360
+        d.twa = math.degrees(math.atan2(self._avg["tytwa"], self._avg["txtwa"])) % 360
+        d.tws = self._avg["ttws"] / self._avg["duration"]
+        d.time_utc = _fmt_time(time.time())
+        d.last_update = self._latest.last_update
+        print("NMEAAvg get and reset avg values")
+        print(d.to_dict())
+
+        if (reset_avgs):
+            self._avg["tsog"] = 0
+            self._avg["taws"] = 0
+            self._avg["ttws"] = 0
+            self._avg["txcog"] = 0
+            self._avg["tycog"] = 0
+            self._avg["txawa"] = 0
+            self._avg["tyawa"] = 0
+            self._avg["txtwa"] = 0
+            self._avg["tytwa"] = 0
+            self._avg["txtwd"] = 0
+            self._avg["tytwd"] = 0
+            self._avg["duration"] = 0
+
+            self._latest_get_and_reset_time = time.time()
+
+        return d.copy()
 
 # ---------------------------------------------------------------------------
 # Fonctions utilitaires de parsing
@@ -157,14 +226,18 @@ class NMEAReceiver:
         self._callbacks = []
         self._connected = False   # pertinent uniquement en mode TCP
         
-        self._nmea_deque = NMEADeque()
+        self._nmea_avg = NMEAAvg()
 
     # ── API publique ────────────────────────────────────────────────────────
 
     def get_snapshot(self) -> NMEAData:
         with self._lock:
-            return self._nmea_deque.get_latest().copy()
+            return self._nmea_avg.get_latest().copy()
             # return self.data.copy()
+
+    def get_and_reset_average_values(self, resest_avgs = True) -> NMEAData:
+        with self._lock:
+            return self._nmea_avg.get_and_reset_average_values(resest_avgs)
 
     def add_callback(self, fn):
         """Enregistre une fonction appelée après chaque trame parsée avec succès."""
@@ -358,7 +431,7 @@ class NMEAReceiver:
                     updated = True
 
         if updated:
-            self._nmea_deque.append(d)
+            self._nmea_avg.add(d)
             for cb in self._callbacks:
                 try:
                     cb()
